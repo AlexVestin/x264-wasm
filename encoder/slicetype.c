@@ -811,7 +811,7 @@ typedef struct
     int *output_intra;
 } x264_slicetype_slice_t;
 
-static void slicetype_slice_cost( x264_slicetype_slice_t *s )
+static void* slicetype_slice_cost( x264_slicetype_slice_t *s )
 {
     x264_t *h = s->h;
 
