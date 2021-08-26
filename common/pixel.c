@@ -55,10 +55,9 @@
 /****************************************************************************
  * pixel_sad_WxH
  ****************************************************************************/
-//   printf("w %d h %d %d %d\n", lx, ly, i_stride_pix1, i_stride_pix2); \
 
 
-#ifdef __SSE__
+#if defined(__SSE__) && defined(__REPLACE_SIMD__) && !_HAVE_MMX
 #define SATD_INT 1
 #define SAD_INT 1
 #endif
@@ -74,8 +73,7 @@
 #if !SAD_INT 
 #define TEST_PIXEL_SAD_C( name, lx, ly ) \
 static int name( pixel* restrict pix1, intptr_t i_stride_pix1,  \
-                 pixel* restrict pix2, intptr_t i_stride_pix2 ) \
-{                                                   \
+                 pixel* restrict pix2, intptr_t i_stride_pix2 ) {  \
     int i_sum = 0;                                  \
     for( int y = 0; y < ly; y++ )                   \
     {                                               \
@@ -87,7 +85,7 @@ static int name( pixel* restrict pix1, intptr_t i_stride_pix1,  \
         pix2 += i_stride_pix2;                      \
     }                                               \
     return i_sum;                                   \
-}
+} 
 
 TEST_PIXEL_SAD_C( x264_pixel_sad_16x16, 16, 16 )
 TEST_PIXEL_SAD_C( x264_pixel_sad_16x8,  16,  8 )
@@ -100,19 +98,29 @@ TEST_PIXEL_SAD_C( x264_pixel_sad_4x4,    4,  4 )
 #endif
 
 #if SAD_INT
-#define DIFF(v1, v2) { \
-  v1 = _mm_sub_epi8(v1,v2); \
-  v1 = _mm_abs_epi8(v1); \
-}
-
 
 static int SAD_FUNC(pixel* restrict pix1, intptr_t i_stride_pix1,
-                 pixel* restrict pix2, intptr_t i_stride_pix2, int ly) { 
+                 pixel* restrict pix2, intptr_t i_stride_pix2, int ly, int lx) { 
    __m128i v1, v2, res; 
   int sum = 0; 
-  for(int y = 0; y < ly; y++) { 
+  for (int y = 0; y < ly; y++) { 
     v1 = _mm_loadl_epi64 (pix1); 
     v2 = _mm_loadl_epi64 (pix2); 
+    res = _mm_sad_epu8(v1, v2); 
+    sum += _mm_extract_epi16(res, 0); 
+    pix1 += i_stride_pix1;    
+    pix2 += i_stride_pix2;  
+  } 
+  return sum; 
+}
+
+static int SAD_FUNC_WIDE(pixel* restrict pix1, intptr_t i_stride_pix1,
+                 pixel* restrict pix2, intptr_t i_stride_pix2, int ly, int lx) { 
+   __m128i v1, v2, res; 
+  int sum = 0; 
+  for (int y = 0; y < ly; y++) { 
+    v1 = _mm_loadu_si128 (pix1); 
+    v2 = _mm_loadu_si128 (pix2); 
     res = _mm_sad_epu8(v1, v2); 
     sum += _mm_extract_epi16(res, 0); 
     pix1 += i_stride_pix1;    
@@ -125,13 +133,18 @@ static int SAD_FUNC(pixel* restrict pix1, intptr_t i_stride_pix1,
 static int name( pixel* restrict pix1, intptr_t i_stride_pix1,  \
                  pixel* restrict pix2, intptr_t i_stride_pix2 ) \
 {                                                       \
-  int t = SAD_FUNC(pix1, i_stride_pix1, pix2, i_stride_pix2, ly); \
-  if(lx == 16) return t + SAD_FUNC(pix1 + 8, i_stride_pix1, pix2 + 8, i_stride_pix2, ly); \
-  return t; \
+  return SAD_FUNC(pix1, i_stride_pix1, pix2, i_stride_pix2, ly, lx); ; \
 } \
 
-PIXEL_SAD_C( x264_pixel_sad_16x16, 16, 16, _mm_loadl_epi64)
-PIXEL_SAD_C( x264_pixel_sad_16x8,  16,  8, _mm_loadl_epi64)
+#define PIXEL_SAD_D( name, lx, ly, load) \
+static int name( pixel* restrict pix1, intptr_t i_stride_pix1,  \
+                 pixel* restrict pix2, intptr_t i_stride_pix2 ) \
+{                                                       \
+  return SAD_FUNC_WIDE(pix1, i_stride_pix1, pix2, i_stride_pix2, ly, lx);  \
+} \
+
+PIXEL_SAD_D( x264_pixel_sad_16x16, 16, 16, _mm_load_si128)
+PIXEL_SAD_D( x264_pixel_sad_16x8,  16,  8, _mm_load_si128)
 PIXEL_SAD_C( x264_pixel_sad_8x16,   8, 16, _mm_loadl_epi64)
 PIXEL_SAD_C( x264_pixel_sad_8x8,    8,  8, _mm_loadl_epi64)
 PIXEL_SAD_C( x264_pixel_sad_8x4,    8,  4, _mm_loadl_epi64)
@@ -142,12 +155,9 @@ PIXEL_SAD_C( x264_pixel_sad_4x4,    4,  4, _mm_loadl_epi64)
 #endif
 
 #if SATD_INT
-  // v1 = _mm_cvtsi64_si128(*((long*)(pix1)));  
-  // v2 = _mm_cvtsi64_si128(*((long*)(pix2))); 
-
 #define LOAD_AND_SUB(v1, v2, pix1, pix2) { \
-  v1 = (__m128i)_mm_load_sd  (pix1);  \
-  v2 = (__m128i)_mm_load_sd  (pix2); \
+  v1 = _mm_loadl_epi64(pix1);  \
+  v2 = _mm_loadl_epi64(pix2); \
   v1 = _mm_unpacklo_epi8(v1, m7); \
   v2 = _mm_unpacklo_epi8(v2, m7); \
   v1 = _mm_sub_epi16(v1, v2); \
@@ -163,6 +173,80 @@ PIXEL_SAD_C( x264_pixel_sad_4x4,    4,  4, _mm_loadl_epi64)
   v1 = _mm_load_si128(&v2); \
   v2 = _mm_unpacklo_epi##size(v2, v3); \
   v1 = _mm_unpackhi_epi##size(v1, v3); \
+}
+
+// TODO this the correct order?
+// pix1 = rdi
+// i_pix1 = rsi
+// pix2 = rdx
+// i_pix2 = rcx
+// https://github.com/AlexVestin/x264-simd/blob/master/misc/log.asm#L9891
+static NOINLINE int satd_4x4_sse4(pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2) {
+
+  intptr_t r8 = i_pix1 + i_pix1 * 2; 
+  intptr_t r9 = i_pix2 + i_pix2 * 2; 
+
+  __m128i m0, m1, m2, m3, m4, m5, m6;
+  // what to load (rip)
+  uint8_t hmul_4p[16] = {1, 1, 1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, -1, 1, -1};
+  m6 = _mm_load_si128(hmul_4p);
+  m4 = _mm_load_si128(&m6);
+
+  m2 = _mm_load_si128(pix2);
+  m5 = _mm_load_si128(pix2 + i_pix2);
+  m2 = (__m128i)_mm_shuffle_ps((__m128)m2, (__m128)m5, 0x0);
+
+  m3 = _mm_load_si128(pix2 + i_pix2*2);
+  m5 = _mm_load_si128(pix2 + r9);
+  m3 = (__m128i)_mm_shuffle_ps((__m128)m3, (__m128)m5, 0x0);
+
+  m0 = _mm_load_si128(pix1);
+  m5 = _mm_load_si128(pix1 + i_pix1);
+  m0 = (__m128i)_mm_shuffle_ps((__m128)m0, (__m128)m5, 0x0);
+ 
+  m1 = _mm_load_si128(pix1 + i_pix1*2);
+  m5 = _mm_load_si128(pix1 + r8);
+  m1 = (__m128i)_mm_shuffle_ps((__m128)m1, (__m128)m5, 0x0);
+
+  m2 = _mm_maddubs_epi16(m2, m4);
+  m0 = _mm_maddubs_epi16(m0, m4);
+  m3 = _mm_maddubs_epi16(m3, m4);
+  m1 = _mm_maddubs_epi16(m1, m4);
+
+  m0 = _mm_sub_epi16(m0, m2);
+  m1 = _mm_sub_epi16(m1, m3);
+  m2 = _mm_load_si128(&m0);
+
+  m0 = _mm_add_epi16(m0, m1);
+  m1 = _mm_sub_epi16(m1, m2);
+  m2 = _mm_load_si128(&m0);
+
+  m0 = _mm_unpacklo_epi64(m0, m1);
+  m2 = _mm_unpacklo_epi64(m2, m1);
+
+  m1 = _mm_load_si128(&m0);
+  m0 = _mm_add_epi16(m0, m2);
+  m2 = _mm_sub_epi16(m2, m1);
+
+  m1 = _mm_load_si128(&m0);
+  m0 = _mm_blend_epi16(m0, m2, 0xaa);
+
+  m2 = _mm_slli_epi32(m2, 0x10);
+  m1 = _mm_srli_epi32(m1, 0x10);
+
+  m2 = _mm_or_si128(m2, m1);
+  m0 = _mm_abs_epi16(m0);
+  m2 = _mm_abs_epi16(m2);
+  m0 = _mm_max_epi16(m0, m2);
+
+  m0 = _mm_madd_epi16(m0, m6);
+  m2 = _mm_shuffle_epi32(m0, 0xee);
+  m0 = _mm_add_epi32(m0, m2);
+  m2 = _mm_shufflelo_epi16(m0, 0x4e);
+  m0 = _mm_add_epi32(m0, m2);
+  int res = _mm_extract_epi16(m0, 0);
+  return res;
+
 }
 
 static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2) {
@@ -196,7 +280,6 @@ static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   LOAD_UNPACK(m2, m4, m1, 32);
   LOAD_SUB(m1, m4, m2);
   
-  // SOME MACRO
   m1 = _mm_load_si128(&m0);
   m0 = (__m128i)_mm_movelh_ps ((__m128)m0, (__m128)m4);
   m1 = _mm_unpackhi_epi64(m1, m4);
@@ -210,7 +293,6 @@ static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   m1 = _mm_max_epi16(m1, m4);
   m0 = _mm_max_epi16(m0, m1);
 
-  // SOME MACRO
   m4 = _mm_load_si128(&m3);
   m3 = (__m128i)_mm_movelh_ps ((__m128)m3, (__m128)m2);
   m4 = _mm_unpackhi_epi64(m4, m2);
@@ -256,7 +338,7 @@ static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   LOAD_SUB(m3, m0, m4);
   
 
-  // 36b0 SOME MACRO
+  // 36b0 
   m1 = _mm_load_si128(&m0);
   m0 = (__m128i)_mm_movelh_ps ((__m128)m0, (__m128)m2);
   m1 = _mm_unpackhi_epi64(m1, m2);
@@ -286,22 +368,10 @@ static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   m6 = _mm_add_epi16(m6, m0);
   m6 = _mm_add_epi16(m6, m4);
 
-  // x264_8_pixel_satd_8x8_internal_sse2
-  
-  // _mm_madd_epi16()
-  #if 1
   m7 = _mm_hadd_epi16(m6, m6);
   m0 = _mm_hadd_epi16(m7, m7);
   m1 = _mm_hadd_epi16(m0, m0);
-  int sum2 = _mm_extract_epi16(m1, 0);
-  #else
-  int16_t vec[8];
-  _mm_store_si128(vec, m6);
-  int sum2 = vec[0] + vec[1] + vec[2] + vec[3] + vec[4] + vec[5] + vec[6] + vec[7];
-  #endif
-
-
-  return sum2;//(rand() % (10000 - 99)); ;//vec[0] + vec[1] + vec[2] + vec[3] + vec[4] + vec[5] + vec[6] + vec[7];
+  return _mm_extract_epi16(m1, 0);
 }
 #endif
 
@@ -558,12 +628,6 @@ static int x264_pixel_satd_##w##x##h( pixel* restrict pix1, intptr_t i_pix1, pix
    } \
 }
 
-// PIXEL_SATD_C( 16, 16, x264_8_pixel_satd_8x8_sse2 )
-// PIXEL_SATD_C( 16, 8,  x264_8_pixel_satd_8x8_sse2 )
-// PIXEL_SATD_C( 8,  16, x264_8_pixel_satd_8x8_sse2 )
-// PIXEL_SATD_C( 8,  8,  x264_8_pixel_satd_8x8_sse2 )
-// PIXEL_SATD_C( 4,  16, x264_pixel_satd_4x4 )
-// PIXEL_SATD_C( 4,  8,  x264_pixel_satd_4x4 )
  PIXEL_SATD_C( 16, 16, satd_8x8_sse2 )
  PIXEL_SATD_C( 16, 8,  satd_8x8_sse2 )
  PIXEL_SATD_C( 8,  16, satd_8x8_sse2 )
@@ -571,20 +635,6 @@ static int x264_pixel_satd_##w##x##h( pixel* restrict pix1, intptr_t i_pix1, pix
  PIXEL_SATD_C( 4,  16, x264_pixel_satd_4x4 )
  PIXEL_SATD_C( 4,  8,  x264_pixel_satd_4x4 )
 
-#if 0
-#define PIXEL_SATD_D(w, h, sub) \
-static int x264_pixel_satd_##w##x##h( pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2 )\
-{\
-  return sub(pix1, i_pix1, pix2, i_pix2); \
-}\
-
-PIXEL_SATD_D( 16, 16, x264_8_pixel_satd_16x16_sse2 )
-PIXEL_SATD_D( 16, 8,  x264_8_pixel_satd_16x8_sse2 )
-PIXEL_SATD_D( 8,  16, x264_8_pixel_satd_8x16_sse2 )
-PIXEL_SATD_D( 8,  8,  x264_8_pixel_satd_8x8_sse2 )
-PIXEL_SATD_D( 4,  16, x264_8_pixel_satd_4x16_sse2 )
-PIXEL_SATD_D( 4,  8,  x264_8_pixel_satd_4x8_sse2 )
-#endif
 #else 
 
 #define PIXEL_SATD_C( w, h, sub )\
