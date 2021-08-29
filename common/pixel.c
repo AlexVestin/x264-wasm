@@ -56,7 +56,6 @@
  * pixel_sad_WxH
  ****************************************************************************/
 
-
 #if defined(__SSE__) && defined(__REPLACE_SIMD__) && !_HAVE_MMX
 #define SATD_INT 1
 #define SAD_INT 1
@@ -182,7 +181,6 @@ PIXEL_SAD_C( x264_pixel_sad_4x4,    4,  4, _mm_loadl_epi64)
 // i_pix2 = rcx
 // https://github.com/AlexVestin/x264-simd/blob/master/misc/log.asm#L9891
 static NOINLINE int satd_4x4_sse4(pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2) {
-
   intptr_t r8 = i_pix1 + i_pix1 * 2; 
   intptr_t r9 = i_pix2 + i_pix2 * 2; 
 
@@ -195,7 +193,7 @@ static NOINLINE int satd_4x4_sse4(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   m2 = _mm_load_si128(pix2);
   m5 = _mm_load_si128(pix2 + i_pix2);
   m2 = (__m128i)_mm_shuffle_ps((__m128)m2, (__m128)m5, 0x0);
-
+  
   m3 = _mm_load_si128(pix2 + i_pix2*2);
   m5 = _mm_load_si128(pix2 + r9);
   m3 = (__m128i)_mm_shuffle_ps((__m128)m3, (__m128)m5, 0x0);
@@ -203,7 +201,7 @@ static NOINLINE int satd_4x4_sse4(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   m0 = _mm_load_si128(pix1);
   m5 = _mm_load_si128(pix1 + i_pix1);
   m0 = (__m128i)_mm_shuffle_ps((__m128)m0, (__m128)m5, 0x0);
- 
+  
   m1 = _mm_load_si128(pix1 + i_pix1*2);
   m5 = _mm_load_si128(pix1 + r8);
   m1 = (__m128i)_mm_shuffle_ps((__m128)m1, (__m128)m5, 0x0);
@@ -244,8 +242,7 @@ static NOINLINE int satd_4x4_sse4(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   m0 = _mm_add_epi32(m0, m2);
   m2 = _mm_shufflelo_epi16(m0, 0x4e);
   m0 = _mm_add_epi32(m0, m2);
-  int res = _mm_extract_epi16(m0, 0);
-  return res;
+  return _mm_extract_epi16(m0, 0);
 
 }
 
@@ -337,7 +334,6 @@ static NOINLINE int satd_8x8_sse2(pixel *pix1, intptr_t i_pix1, pixel *pix2, int
   LOAD_UNPACK(m3, m2, m1, 32);
   LOAD_SUB(m3, m0, m4);
   
-
   // 36b0 
   m1 = _mm_load_si128(&m0);
   m0 = (__m128i)_mm_movelh_ps ((__m128)m0, (__m128)m2);
@@ -632,8 +628,11 @@ static int x264_pixel_satd_##w##x##h( pixel* restrict pix1, intptr_t i_pix1, pix
  PIXEL_SATD_C( 16, 8,  satd_8x8_sse2 )
  PIXEL_SATD_C( 8,  16, satd_8x8_sse2 )
  PIXEL_SATD_C( 8,  8,  satd_8x8_sse2 )
- PIXEL_SATD_C( 4,  16, x264_pixel_satd_4x4 )
- PIXEL_SATD_C( 4,  8,  x264_pixel_satd_4x4 )
+ // PIXEL_SATD_C( 4,  16, x264_pixel_satd_4x4 )
+ // PIXEL_SATD_C( 4,  8,  x264_pixel_satd_4x4 )
+ PIXEL_SATD_C( 4,  16, satd_4x4_sse4 )
+ PIXEL_SATD_C( 4,  8,  satd_4x4_sse4 )
+
 
 #else 
 
